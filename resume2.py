@@ -794,14 +794,18 @@ def display_excel_location_selector():
                 
                     # Show column information
                     st.subheader("📋 Column Information")
-                    col_info = pd.DataFrame({
-                        'Column': existing_df.columns,
-                        'Data Type': [str(dtype) for dtype in existing_df.dtypes],
-                        'Non-Null Count': [existing_df[col].count() for col in existing_df.columns],
-                        'Sample Values': [str(existing_df[col].dropna().iloc[0]) if not existing_df[col].dropna().empty else 'No data'
+                    # Check if existing_df is not None before accessing its properties
+                    if existing_df is not None:
+                        col_info = pd.DataFrame({
+                            'Column': existing_df.columns,
+                            'Data Type': [str(dtype) for dtype in existing_df.dtypes],
+                            'Non-Null Count': [existing_df[col].count() for col in existing_df.columns],
+                            'Sample Values': [str(existing_df[col].dropna().iloc[0]) if not existing_df[col].dropna().empty else 'No data'
 for col in existing_df.columns]
-                })
-                st.dataframe(col_info, use_container_width=True)
+                        })
+                        st.dataframe(col_info, use_container_width=True)
+                    else:
+                        st.warning("Could not display column information as the Excel file is not valid.")
     
     return existing_excel_file, excel_mode
 
