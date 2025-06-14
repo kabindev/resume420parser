@@ -361,6 +361,26 @@ JSON only:"""
                 json=payload,
                 timeout=90
             )
+            logger.info(f"OpenRouter Response Headers: {response.headers}")
+
+            # Extract rate limit headers
+            rate_limit_headers_to_check = {
+                'limit': ['X-RateLimit-Limit', 'x-ratelimit-limit', 'openrouter-ratelimit-limit'],
+                'remaining': ['X-RateLimit-Remaining', 'x-ratelimit-remaining', 'openrouter-ratelimit-remaining'],
+                'reset': ['X-RateLimit-Reset', 'x-ratelimit-reset', 'openrouter-ratelimit-reset']
+            }
+            extracted_rate_limit_info = {}
+            for key, header_names in rate_limit_headers_to_check.items():
+                for header_name in header_names:
+                    # Check with .get() for case-insensitivity and to avoid KeyError
+                    header_value = response.headers.get(header_name)
+                    if header_value:
+                        extracted_rate_limit_info[key] = header_value
+                        break  # Found one, no need to check other variants for this key
+            
+            if extracted_rate_limit_info:
+                st.session_state['rate_limit_info'] = extracted_rate_limit_info
+                logger.info(f"OpenRouter Rate Limit Info: {st.session_state['rate_limit_info']}")
             
             if response.status_code == 200:
                 result = response.json()
@@ -384,7 +404,27 @@ JSON only:"""
             elif response.status_code == 429:
                 # Rate limiting - implement exponential backoff
                 wait_time = config.exponential_backoff_base * (2 ** attempt) + random.uniform(1, 5)
-                st.warning(f"Rate limited (429). Waiting {wait_time:.1f} seconds before retry {attempt + 1}/{config.max_retries}")
+                
+                # Log rate limit info if available
+                log_message = f"Rate limited (429). Waiting {wait_time:.1f} seconds before retry {attempt + 1}/{config.max_retries}."
+                if 'rate_limit_info' in st.session_state and isinstance(st.session_state['rate_limit_info'], dict):
+                    limit_info = st.session_state['rate_limit_info']
+                    log_message += (
+                        f" Current Rate Limit Info: Limit: {limit_info.get('limit', 'N/A')}, "
+                        f"Remaining: {limit_info.get('remaining', 'N/A')}, "
+                        f"Reset: {limit_info.get('reset', 'N/A')}."
+                    )
+                    st.warning(
+                        f"Rate limited (429). "
+                        f"Limit: {limit_info.get('limit', 'N/A')}, "
+                        f"Remaining: {limit_info.get('remaining', 'N/A')}, "
+                        f"Reset: {limit_info.get('reset', 'N/A')}. "
+                        f"Waiting {wait_time:.1f} seconds before retry {attempt + 1}/{config.max_retries}"
+                    )
+                else:
+                    st.warning(f"Rate limited (429). Waiting {wait_time:.1f} seconds before retry {attempt + 1}/{config.max_retries}")
+                
+                logger.warning(log_message)
                 time.sleep(wait_time)
                 continue
                 
@@ -858,6 +898,35 @@ def main():
             with st.sidebar.expander("Recently Processed Files", expanded=True):
                 for filename in list(st.session_state.processed_file_hashes.keys())[-5:]:
                     st.write(f"• {filename}")
+
+    # Display OpenRouter Rate Limit Info
+    if 'rate_limit_info' in st.session_state and isinstance(st.session_state.rate_limit_info, dict):
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("📈 OpenRouter API Status")
+        rate_info = st.session_state.rate_limit_info
+        remaining = rate_info.get('remaining', 'N/A')
+        limit = rate_info.get('limit', 'N/A')
+        reset = rate_info.get('reset', 'N/A') # This is usually a timestamp or seconds
+        
+        # Attempt to make 'reset' more human-readable if it's a timestamp
+        reset_display = reset
+        if isinstance(reset, str) and reset.isdigit(): # If it's a string of digits, assume it's a Unix timestamp
+            try:
+                reset_datetime = datetime.fromtimestamp(int(reset))
+                reset_display = reset_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except ValueError: # If timestamp is out of range or invalid
+                pass # Keep original reset value
+        elif isinstance(reset, (int, float)): # If it's a number, assume Unix timestamp
+            try:
+                reset_datetime = datetime.fromtimestamp(reset)
+                reset_display = reset_datetime.strftime('%Y-%m-%d %H:%M:%S UTC')
+            except ValueError:
+                pass
+
+
+        st.sidebar.metric(label="Requests Remaining", value=str(remaining))
+        st.sidebar.caption(f"Request Limit: {limit}")
+        st.sidebar.caption(f"Resets: {reset_display}")
     
     # Clear session button
     if st.sidebar.button("🗑️ Clear Session Data", help="Clear all processed file tracking"):
